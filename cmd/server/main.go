@@ -21,7 +21,9 @@ func main() {
 }
 
 func run() error {
-	cs := server.CreateChatServer(log.Printf)
+	hub := server.CreateHub()
+	go hub.Run()
+	cs := server.CreateChatServer(log.Printf, hub)
 
 	if len(os.Args) < 2 {
 		return errors.New("please provide an address to listen on as the first argument")

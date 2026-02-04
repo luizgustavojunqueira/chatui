@@ -3,7 +3,11 @@ package client
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
+
+	message "chatui/internal/protocol"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -41,10 +45,38 @@ func (cc ChatClient) Close(c *websocket.Conn) {
 	}
 }
 
-func (cc ChatClient) SendMessage(c *websocket.Conn, message any) {
-	err := wsjson.Write(context.Background(), c, message)
+func (cc ChatClient) SendMessage(c *websocket.Conn, msg string) {
+	sendMsg := message.ChatMessage{
+		Message: msg,
+	}
+
+	err := wsjson.Write(context.Background(), c, sendMsg)
 	if err != nil {
 		cc.logf("json data write error: %v", err)
 		return
+	}
+}
+
+func (cc ChatClient) ReceiveMessage(c *websocket.Conn, ctx context.Context) {
+	for {
+		var msg message.ChatMessage
+		err := wsjson.Read(context.Background(), c, &msg)
+		if err != nil {
+			status := websocket.CloseStatus(err)
+
+			if status == websocket.StatusNormalClosure || status == websocket.StatusGoingAway {
+				cc.logf("websocket closed")
+				return
+			}
+
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+
+			cc.logf("error receiving message: %v", err)
+			return
+		}
+
+		fmt.Printf("[%s]: %s\n", msg.Username, msg.Message)
 	}
 }

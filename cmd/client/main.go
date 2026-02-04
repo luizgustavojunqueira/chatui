@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -26,6 +27,11 @@ func run() error {
 	c := cc.Connect(os.Args[1])
 
 	defer cc.Close(c)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go cc.ReceiveMessage(c, ctx)
 
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Println("Type messages and press Enter. Type /quit to exit.")
