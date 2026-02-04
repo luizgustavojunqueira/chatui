@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -31,14 +32,34 @@ func (cs ChatServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
 
-	var v any
-	err = wsjson.Read(ctx, c, &v)
-	if err != nil {
-		cs.logf("json data read error: %v", err)
-		return
-	}
+	for {
 
-	cs.logf("Received: %v", v)
+		var v any
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			status := websocket.CloseStatus(err)
+
+			if status == websocket.StatusNormalClosure || status == websocket.StatusGoingAway {
+				cs.logf("connection closed from client")
+				break
+			}
+
+			if errors.Is(err, context.DeadlineExceeded) {
+				cs.logf("read timeout")
+				return
+			}
+
+			if status != -1 {
+				cs.logf("connection closed with status %d: %v", status, err)
+				return
+			}
+
+			cs.logf("json data read error: %v", err)
+			break
+		}
+
+		cs.logf("Received: %v", v)
+	}
 
 	c.Close(websocket.StatusNormalClosure, "")
 }
