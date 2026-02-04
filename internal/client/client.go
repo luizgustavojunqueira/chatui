@@ -4,7 +4,6 @@ package client
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	message "chatui/internal/protocol"
@@ -57,26 +56,29 @@ func (cc ChatClient) SendMessage(c *websocket.Conn, msg string) {
 	}
 }
 
-func (cc ChatClient) ReceiveMessage(c *websocket.Conn, ctx context.Context) {
-	for {
-		var msg message.ChatMessage
-		err := wsjson.Read(context.Background(), c, &msg)
-		if err != nil {
-			status := websocket.CloseStatus(err)
+func (cc ChatClient) ReceiveMessage(c *websocket.Conn, ctx context.Context) message.ChatMessage {
+	var msg message.ChatMessage
+	err := wsjson.Read(context.Background(), c, &msg)
+	if err != nil {
+		status := websocket.CloseStatus(err)
 
-			if status == websocket.StatusNormalClosure || status == websocket.StatusGoingAway {
-				cc.logf("websocket closed")
-				return
+		if status == websocket.StatusNormalClosure || status == websocket.StatusGoingAway {
+			cc.logf("websocket closed")
+			return message.ChatMessage{
+				Message: "Websocket connection closed.",
 			}
-
-			if errors.Is(err, context.Canceled) {
-				return
-			}
-
-			cc.logf("error receiving message: %v", err)
-			return
 		}
 
-		fmt.Printf("[%s]: %s\n", msg.Username, msg.Message)
+		if errors.Is(err, context.Canceled) {
+			return message.ChatMessage{
+				Message: "Context canceled.",
+			}
+		}
+
+		cc.logf("error receiving message: %v", err)
+		return message.ChatMessage{
+			Message: "Error receiving message.",
+		}
 	}
+	return msg
 }
