@@ -3,7 +3,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -18,19 +17,26 @@ type ConnectedClient struct {
 	Username string
 }
 
+type usernameCheck struct {
+	username string
+	response chan bool
+}
+
 type Hub struct {
-	clients    map[*ConnectedClient]bool
-	broadcast  chan message.ChatMessage
-	register   chan *ConnectedClient
-	unregister chan *ConnectedClient
+	clients       map[*ConnectedClient]bool
+	broadcast     chan message.ChatMessage
+	register      chan *ConnectedClient
+	unregister    chan *ConnectedClient
+	checkUsername chan usernameCheck
 }
 
 func CreateHub() Hub {
 	return Hub{
-		clients:    make(map[*ConnectedClient]bool),
-		broadcast:  make(chan message.ChatMessage),
-		register:   make(chan *ConnectedClient),
-		unregister: make(chan *ConnectedClient),
+		clients:       make(map[*ConnectedClient]bool),
+		broadcast:     make(chan message.ChatMessage),
+		register:      make(chan *ConnectedClient),
+		unregister:    make(chan *ConnectedClient),
+		checkUsername: make(chan usernameCheck),
 	}
 }
 
@@ -57,10 +63,12 @@ func (cs ChatServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*24)
 	defer cancel()
 
-	userName := generateRandomUsername()
 	client := &ConnectedClient{
-		Conn:     c,
-		Username: userName,
+		Conn: c,
+	}
+
+	if !cs.handleUsernameRegistration(ctx, client) {
+		return
 	}
 
 	cs.hub.register <- client
@@ -83,6 +91,34 @@ func (cs ChatServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c.Close(websocket.StatusNormalClosure, "")
 }
 
+func (cs ChatServer) handleUsernameRegistration(ctx context.Context, client *ConnectedClient) bool {
+	for {
+		var loginReq message.LoginRequest
+		err := wsjson.Read(ctx, client.Conn, &loginReq)
+		if err != nil {
+			cs.logf("error reading login request: %v", err)
+			return false
+		}
+		if cs.hub.isUsernameTaken(loginReq.Username) {
+			resp := message.LoginResponse{
+				Success: false,
+				Message: "Username is already taken",
+			}
+			wsjson.Write(ctx, client.Conn, resp)
+			continue
+
+		}
+
+		client.Username = loginReq.Username
+		resp := message.LoginResponse{
+			Success: true,
+			Message: "Login successful",
+		}
+		wsjson.Write(ctx, client.Conn, resp)
+		return true
+	}
+}
+
 func (hub Hub) Run() {
 	for {
 		select {
@@ -97,11 +133,23 @@ func (hub Hub) Run() {
 			for client := range hub.clients {
 				wsjson.Write(context.Background(), client.Conn, msg)
 			}
+		case check := <-hub.checkUsername:
+			taken := false
+			for client := range hub.clients {
+				if client.Username == check.username {
+					taken = true
+				}
+			}
+			check.response <- taken
 		}
 	}
 }
 
-func generateRandomUsername() string {
-	randomNumber := time.Now().UnixNano() % 10000
-	return fmt.Sprintf("User%04d", randomNumber)
+func (hub Hub) isUsernameTaken(username string) bool {
+	responseChan := make(chan bool)
+	hub.checkUsername <- usernameCheck{
+		username: username,
+		response: responseChan,
+	}
+	return <-responseChan
 }

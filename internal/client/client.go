@@ -58,7 +58,7 @@ func (cc ChatClient) SendMessage(c *websocket.Conn, msg string) {
 
 func (cc ChatClient) ReceiveMessage(c *websocket.Conn, ctx context.Context) message.ChatMessage {
 	var msg message.ChatMessage
-	err := wsjson.Read(context.Background(), c, &msg)
+	err := wsjson.Read(ctx, c, &msg)
 	if err != nil {
 		status := websocket.CloseStatus(err)
 
@@ -78,6 +78,31 @@ func (cc ChatClient) ReceiveMessage(c *websocket.Conn, ctx context.Context) mess
 		cc.logf("error receiving message: %v", err)
 		return message.ChatMessage{
 			Message: "Error receiving message.",
+		}
+	}
+	return msg
+}
+
+func (cc ChatClient) SetUsername(c *websocket.Conn, username string) {
+	msg := message.LoginRequest{
+		Username: username,
+	}
+
+	err := wsjson.Write(context.Background(), c, msg)
+	if err != nil {
+		cc.logf("json data write error: %v", err)
+		return
+	}
+}
+
+func (cc ChatClient) ReceiveLoginResponse(c *websocket.Conn, ctx context.Context) message.LoginResponse {
+	var msg message.LoginResponse
+	err := wsjson.Read(ctx, c, &msg)
+	if err != nil {
+		cc.logf("error receiving login response: %v", err)
+		return message.LoginResponse{
+			Success: false,
+			Message: "Error receiving login response.",
 		}
 	}
 	return msg
