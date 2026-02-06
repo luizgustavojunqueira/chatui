@@ -3,7 +3,8 @@ package client
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
+	"fmt"
 	"time"
 
 	message "chatui/internal/protocol"
@@ -36,6 +37,10 @@ func (cc ChatClient) Connect(addr string) *websocket.Conn {
 	return c
 }
 
+func (cc ChatClient) Disconnect(c *websocket.Conn) {
+	c.Close(websocket.StatusNormalClosure, "client disconnecting")
+}
+
 func (cc ChatClient) Close(c *websocket.Conn) {
 	err := c.Close(websocket.StatusNormalClosure, "")
 	if err != nil {
@@ -49,38 +54,23 @@ func (cc ChatClient) SendMessage(c *websocket.Conn, msg string) {
 		Message: msg,
 	}
 
-	err := wsjson.Write(context.Background(), c, sendMsg)
+	envelope := message.Envelope{
+		Type: message.TypeChatMessage,
+		Data: func() json.RawMessage {
+			data, err := json.Marshal(sendMsg)
+			if err != nil {
+				cc.logf("json marshal error: %v", err)
+				return nil
+			}
+			return data
+		}(),
+	}
+
+	err := wsjson.Write(context.Background(), c, envelope)
 	if err != nil {
 		cc.logf("json data write error: %v", err)
 		return
 	}
-}
-
-func (cc ChatClient) ReceiveMessage(c *websocket.Conn, ctx context.Context) message.ChatMessage {
-	var msg message.ChatMessage
-	err := wsjson.Read(ctx, c, &msg)
-	if err != nil {
-		status := websocket.CloseStatus(err)
-
-		if status == websocket.StatusNormalClosure || status == websocket.StatusGoingAway {
-			cc.logf("websocket closed")
-			return message.ChatMessage{
-				Message: "Websocket connection closed.",
-			}
-		}
-
-		if errors.Is(err, context.Canceled) {
-			return message.ChatMessage{
-				Message: "Context canceled.",
-			}
-		}
-
-		cc.logf("error receiving message: %v", err)
-		return message.ChatMessage{
-			Message: "Error receiving message.",
-		}
-	}
-	return msg
 }
 
 func (cc ChatClient) SetUsername(c *websocket.Conn, username string) {
@@ -88,22 +78,46 @@ func (cc ChatClient) SetUsername(c *websocket.Conn, username string) {
 		Username: username,
 	}
 
-	err := wsjson.Write(context.Background(), c, msg)
+	envelope := message.Envelope{
+		Type: message.TypeLoginRequest,
+		Data: func() json.RawMessage {
+			data, err := json.Marshal(msg)
+			if err != nil {
+				cc.logf("json marshal error: %v", err)
+				return nil
+			}
+			return data
+		}(),
+	}
+
+	err := wsjson.Write(context.Background(), c, envelope)
 	if err != nil {
 		cc.logf("json data write error: %v", err)
 		return
 	}
 }
 
-func (cc ChatClient) ReceiveLoginResponse(c *websocket.Conn, ctx context.Context) message.LoginResponse {
-	var msg message.LoginResponse
-	err := wsjson.Read(ctx, c, &msg)
+func (cc ChatClient) ReceiveMessage(c *websocket.Conn, ctx context.Context) (any, error) {
+	var envelope message.Envelope
+	err := wsjson.Read(ctx, c, &envelope)
 	if err != nil {
-		cc.logf("error receiving login response: %v", err)
-		return message.LoginResponse{
-			Success: false,
-			Message: "Error receiving login response.",
-		}
+		return nil, err
 	}
-	return msg
+
+	switch envelope.Type {
+	case message.TypeChatMessage:
+		var msg message.ChatMessage
+		json.Unmarshal(envelope.Data, &msg)
+		return msg, nil
+	case message.TypeLoginResponse:
+		var msg message.LoginResponse
+		json.Unmarshal(envelope.Data, &msg)
+		return msg, nil
+	case message.TypeUserListUpdate:
+		var msg message.UserListUpdate
+		json.Unmarshal(envelope.Data, &msg)
+		return msg, nil
+	default:
+		return nil, fmt.Errorf("unknown message type: %s", envelope.Type)
+	}
 }

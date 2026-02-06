@@ -6,6 +6,8 @@ import (
 	"log"
 	"strings"
 
+	message "chatui/internal/protocol"
+
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -27,8 +29,11 @@ type loginMsg struct {
 	success bool
 	message string
 }
+type userListMsg struct {
+	users []string
+}
 
-type connectionErrorMsg struct {
+type errorMsg struct {
 	err error
 }
 
@@ -39,15 +44,29 @@ const (
 	ViewChat
 )
 
+type FocusState int
+
+const (
+	FocusChat FocusState = iota
+	FocusUserList
+)
+
 type model struct {
 	// Login
 	usernameInput textinput.Model
 	loginHelper   string
 
+	// UserList
+	currentUsers     []string
+	currentSelection int
+
 	// Chat
 	viewport viewport.Model
 	messages []string
 	textarea textarea.Model
+
+	// Focus
+	focusedArea FocusState
 
 	// Shared
 	chatClient  *ChatClient
@@ -78,7 +97,7 @@ func InitialModel(addr string) model {
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	ta.ShowLineNumbers = false
 
-	vp := viewport.New(50, 20)
+	vp := viewport.New(70, 20)
 
 	vp.SetContent("Welcome to the chat!\n")
 
@@ -91,16 +110,18 @@ func InitialModel(addr string) model {
 	ui.Width = 20
 
 	return model{
-		viewport:      vp,
-		textarea:      ta,
-		messages:      []string{},
-		err:           nil,
-		senderStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true),
-		chatClient:    CreateChatClient(log.Printf),
-		address:       addr,
-		usernameInput: ui,
-		currentView:   ViewLogin,
-		loginHelper:   "",
+		viewport:         vp,
+		textarea:         ta,
+		messages:         []string{},
+		err:              nil,
+		senderStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true),
+		chatClient:       CreateChatClient(log.Printf),
+		address:          addr,
+		usernameInput:    ui,
+		currentView:      ViewLogin,
+		loginHelper:      "",
+		currentUsers:     []string{},
+		currentSelection: 0,
 	}
 }
 
@@ -115,7 +136,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case connectedMsg:
 		m.conn = msg.conn
-	case connectionErrorMsg:
+	case errorMsg:
 		m.err = msg.err
 	}
 	switch m.currentView {
@@ -146,7 +167,46 @@ func (m model) viewLogin() string {
 }
 
 func (m model) viewChat() string {
-	return fmt.Sprintf("%s%s%s", m.viewport.View(), gap, m.textarea.View())
+	return lipgloss.JoinHorizontal(lipgloss.Top, m.renderSidebar(), m.renderChatArea())
+}
+
+func (m model) renderSidebar() string {
+	var userList strings.Builder
+	userList.WriteString("Active users\n\n")
+	for i, user := range m.currentUsers {
+		if i == m.currentSelection {
+			fmt.Fprintf(&userList, "» %s\n", user)
+		} else {
+			fmt.Fprintf(&userList, "  %s\n", user)
+		}
+	}
+	style := lipgloss.NewStyle().
+		Width(20).
+		Padding(1).
+		Border(lipgloss.RoundedBorder())
+
+	if m.focusedArea == FocusUserList {
+		style = style.BorderForeground(lipgloss.Color("62"))
+	} else {
+		style = style.BorderForeground(lipgloss.Color("240"))
+	}
+
+	return style.Render(userList.String())
+}
+
+func (m model) renderChatArea() string {
+	vpStyle := lipgloss.NewStyle()
+	if m.focusedArea == FocusChat {
+		vpStyle = vpStyle.BorderForeground(lipgloss.Color("62"))
+	}
+	taStyle := lipgloss.NewStyle()
+	if m.focusedArea == FocusChat {
+		taStyle = taStyle.BorderForeground(lipgloss.Color("62"))
+	}
+	return lipgloss.JoinVertical(lipgloss.Top,
+		vpStyle.Border(lipgloss.RoundedBorder()).Padding(1).Width(m.viewport.Width).Height(m.viewport.Height).Render(m.viewport.View()),
+		taStyle.Border(lipgloss.RoundedBorder()).Padding(1).Render(m.textarea.View()),
+	)
 }
 
 func (m model) updateLogin(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -157,8 +217,7 @@ func (m model) updateLogin(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case loginMsg:
 		if msg.success {
 			m.currentView = ViewChat
-			return m,
-				listenCmd(m.chatClient, m.conn)
+			return m, listenCmd(m.chatClient, m.conn)
 		} else {
 			m.loginHelper = "Login failed: " + msg.message
 			return m, nil
@@ -173,7 +232,7 @@ func (m model) updateLogin(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			return m, tea.Batch(
 				setUsernameCmd(m.chatClient, m.conn, username),
-				listenUsernameCmd(m.chatClient, m.conn),
+				listenCmd(m.chatClient, m.conn),
 			)
 		default:
 			m.loginHelper = ""
@@ -190,11 +249,10 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		vpCmd tea.Cmd
 	)
 
-	m.textarea, tiCmd = m.textarea.Update(msg)
-	m.viewport, vpCmd = m.viewport.Update(msg)
-
 	switch msg := msg.(type) {
-
+	case userListMsg:
+		m.currentUsers = msg.users
+		return m, listenCmd(m.chatClient, m.conn)
 	case receivedMsg:
 		m.messages = append(m.messages, m.senderStyle.Render(msg.username+": ")+msg.content)
 		m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(strings.Join(m.messages, "\n")))
@@ -210,23 +268,58 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.viewport.GotoBottom()
-
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
-			fmt.Println(m.textarea.Value())
 			return m, tea.Quit
 		case tea.KeyEnter:
-			value := m.textarea.Value()
-			m.textarea.Reset()
-			m.viewport.GotoBottom()
 
-			return m, sendCmd(m.chatClient, m.conn, value)
+			if m.focusedArea == FocusUserList {
+				return m, nil
+			} else {
+				value := m.textarea.Value()
+				m.textarea.Reset()
+				m.viewport.GotoBottom()
+
+				if value == "/quit" {
+					m.chatClient.Disconnect(m.conn)
+					return m, tea.Quit
+				}
+
+				return m, sendCmd(m.chatClient, m.conn, value)
+			}
+		case tea.KeyTab:
+			if m.focusedArea == FocusChat {
+				m.focusedArea = FocusUserList
+				m.textarea.Blur()
+			} else {
+				m.focusedArea = FocusChat
+				m.textarea.Focus()
+			}
+			return m, nil
+		case tea.KeyUp:
+			if m.focusedArea == FocusUserList {
+				if m.currentSelection > 0 {
+					m.currentSelection--
+				}
+			}
+		case tea.KeyDown:
+			if m.focusedArea == FocusUserList {
+				if m.currentSelection < len(m.currentUsers)-1 {
+					m.currentSelection++
+				}
+			}
+
 		}
 
 	case errMsg:
 		m.err = msg
 		return m, nil
+	}
+
+	if m.focusedArea == FocusChat {
+		m.textarea, tiCmd = m.textarea.Update(msg)
+		m.viewport, vpCmd = m.viewport.Update(msg)
 	}
 
 	return m, tea.Batch(tiCmd, vpCmd)
@@ -236,7 +329,7 @@ func connectCmd(cc *ChatClient, addr string) tea.Cmd {
 	return func() tea.Msg {
 		conn := cc.Connect(addr)
 		if conn == nil {
-			return connectionErrorMsg{err: fmt.Errorf("failed to connect to server")}
+			return errorMsg{err: fmt.Errorf("failed to connect to server")}
 		}
 
 		return connectedMsg{conn: conn, username: "User"}
@@ -250,17 +343,24 @@ func setUsernameCmd(cc *ChatClient, conn *websocket.Conn, username string) tea.C
 	}
 }
 
-func listenUsernameCmd(cc *ChatClient, conn *websocket.Conn) tea.Cmd {
-	return func() tea.Msg {
-		msg := cc.ReceiveLoginResponse(conn, context.Background())
-		return loginMsg{success: msg.Success, message: msg.Message}
-	}
-}
-
 func listenCmd(cc *ChatClient, conn *websocket.Conn) tea.Cmd {
 	return func() tea.Msg {
-		msg := cc.ReceiveMessage(conn, context.Background())
-		return receivedMsg{username: msg.Username, content: msg.Message}
+		msg, err := cc.ReceiveMessage(conn, context.Background())
+		if err != nil {
+			return errorMsg{err: err}
+		}
+
+		switch msg := msg.(type) {
+		case message.ChatMessage:
+			return receivedMsg{username: msg.Username, content: msg.Message}
+		case message.LoginResponse:
+			return loginMsg{success: msg.Success, message: msg.Message}
+		case message.UserListUpdate:
+			return userListMsg{users: msg.Users}
+
+		default:
+			return nil
+		}
 	}
 }
 
