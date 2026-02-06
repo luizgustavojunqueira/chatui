@@ -3,15 +3,17 @@ package message
 
 import "encoding/json"
 
+type MessageType string
+
 const (
-	TypeChatMessage    = "chat_message"
-	TypeLoginResponse  = "login_response"
-	TypeUserListUpdate = "user_list_update"
-	TypeLoginRequest   = "login_request"
+	TypeChatMessage    MessageType = "chat_message"
+	TypeLoginResponse  MessageType = "login_response"
+	TypeUserListUpdate MessageType = "user_list_update"
+	TypeLoginRequest   MessageType = "login_request"
 )
 
 type Envelope struct {
-	Type string          `json:"type"`
+	Type MessageType     `json:"type"`
 	Data json.RawMessage `json:"data"`
 }
 
@@ -31,4 +33,14 @@ type LoginResponse struct {
 
 type UserListUpdate struct {
 	Users []string `json:"users"`
+}
+
+func MakeEnvelope(msgType MessageType, msg any) Envelope {
+	return Envelope{
+		Type: msgType,
+		Data: func() []byte {
+			data, _ := json.Marshal(msg)
+			return data
+		}(),
+	}
 }

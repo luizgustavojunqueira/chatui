@@ -54,17 +54,7 @@ func (cc ChatClient) SendMessage(c *websocket.Conn, msg string) {
 		Message: msg,
 	}
 
-	envelope := message.Envelope{
-		Type: message.TypeChatMessage,
-		Data: func() json.RawMessage {
-			data, err := json.Marshal(sendMsg)
-			if err != nil {
-				cc.logf("json marshal error: %v", err)
-				return nil
-			}
-			return data
-		}(),
-	}
+	envelope := message.MakeEnvelope(message.TypeChatMessage, sendMsg)
 
 	err := wsjson.Write(context.Background(), c, envelope)
 	if err != nil {
@@ -78,17 +68,7 @@ func (cc ChatClient) SetUsername(c *websocket.Conn, username string) {
 		Username: username,
 	}
 
-	envelope := message.Envelope{
-		Type: message.TypeLoginRequest,
-		Data: func() json.RawMessage {
-			data, err := json.Marshal(msg)
-			if err != nil {
-				cc.logf("json marshal error: %v", err)
-				return nil
-			}
-			return data
-		}(),
-	}
+	envelope := message.MakeEnvelope(message.TypeLoginRequest, msg)
 
 	err := wsjson.Write(context.Background(), c, envelope)
 	if err != nil {

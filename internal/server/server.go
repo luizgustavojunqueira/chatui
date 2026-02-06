@@ -110,18 +110,11 @@ func (cs ChatServer) handleUsernameRegistration(ctx context.Context, client *Con
 		}
 
 		if envelope.Type != message.TypeLoginRequest {
-			resp := message.LoginResponse{
+			resp := message.MakeEnvelope(message.TypeLoginResponse, message.LoginResponse{
 				Success: false,
 				Message: "Expected login request",
-			}
-			envResponse := message.Envelope{
-				Type: message.TypeLoginResponse,
-				Data: func() []byte {
-					data, _ := json.Marshal(resp)
-					return data
-				}(),
-			}
-			wsjson.Write(ctx, client.Conn, envResponse)
+			})
+			wsjson.Write(ctx, client.Conn, resp)
 			continue
 		}
 
@@ -130,36 +123,22 @@ func (cs ChatServer) handleUsernameRegistration(ctx context.Context, client *Con
 		json.Unmarshal(envelope.Data, &loginReq)
 
 		if cs.hub.isUsernameTaken(loginReq.Username) {
-			resp := message.LoginResponse{
+			resp := message.MakeEnvelope(message.TypeLoginResponse, message.LoginResponse{
 				Success: false,
 				Message: "Username is already taken",
-			}
-			envResponse := message.Envelope{
-				Type: message.TypeLoginResponse,
-				Data: func() []byte {
-					data, _ := json.Marshal(resp)
-					return data
-				}(),
-			}
+			})
+			wsjson.Write(ctx, client.Conn, resp)
 
-			wsjson.Write(ctx, client.Conn, envResponse)
 			continue
 
 		}
 
 		client.Username = loginReq.Username
-		resp := message.LoginResponse{
+		resp := message.MakeEnvelope(message.TypeLoginResponse, message.LoginResponse{
 			Success: true,
 			Message: "Login successful",
-		}
-		envelopeResp := message.Envelope{
-			Type: message.TypeLoginResponse,
-			Data: func() []byte {
-				data, _ := json.Marshal(resp)
-				return data
-			}(),
-		}
-		wsjson.Write(ctx, client.Conn, envelopeResp)
+		})
+		wsjson.Write(ctx, client.Conn, resp)
 		return true
 	}
 }
@@ -177,13 +156,7 @@ func (hub Hub) Run() {
 				userList.Users = append(userList.Users, client.Username)
 			}
 
-			envelope := message.Envelope{
-				Type: message.TypeUserListUpdate,
-				Data: func() []byte {
-					data, _ := json.Marshal(userList)
-					return data
-				}(),
-			}
+			envelope := message.MakeEnvelope(message.TypeUserListUpdate, userList)
 			for client := range hub.clients {
 				wsjson.Write(context.Background(), client.Conn, envelope)
 			}
@@ -193,13 +166,8 @@ func (hub Hub) Run() {
 				client.Conn.Close(websocket.StatusNormalClosure, "")
 			}
 		case msg := <-hub.broadcast:
-			envelope := message.Envelope{
-				Type: message.TypeChatMessage,
-				Data: func() []byte {
-					data, _ := json.Marshal(msg)
-					return data
-				}(),
-			}
+
+			envelope := message.MakeEnvelope(message.TypeChatMessage, msg)
 			for client := range hub.clients {
 				wsjson.Write(context.Background(), client.Conn, envelope)
 			}
