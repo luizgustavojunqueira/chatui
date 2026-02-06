@@ -18,8 +18,9 @@ type Envelope struct {
 }
 
 type ChatMessage struct {
-	Username string `json:"username"`
-	Message  string `json:"message"`
+	Username    string `json:"username"`
+	Destination string `json:"destination"`
+	Message     string `json:"message"`
 }
 
 type LoginRequest struct {

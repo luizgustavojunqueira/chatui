@@ -49,9 +49,10 @@ func (cc ChatClient) Close(c *websocket.Conn) {
 	}
 }
 
-func (cc ChatClient) SendMessage(c *websocket.Conn, msg string) {
+func (cc ChatClient) SendMessage(c *websocket.Conn, msg string, destination string) {
 	sendMsg := message.ChatMessage{
-		Message: msg,
+		Destination: destination,
+		Message:     msg,
 	}
 
 	envelope := message.MakeEnvelope(message.TypeChatMessage, sendMsg)

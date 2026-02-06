@@ -22,8 +22,9 @@ type connectedMsg struct {
 }
 
 type receivedMsg struct {
-	username string
-	content  string
+	username    string
+	destination string
+	content     string
 }
 type loginMsg struct {
 	success bool
@@ -62,7 +63,7 @@ type model struct {
 
 	// Chat
 	viewport viewport.Model
-	messages []string
+	messages map[string][]string
 	textarea textarea.Model
 
 	// Focus
@@ -114,7 +115,7 @@ func InitialModel(addr string) model {
 	return model{
 		viewport:         vp,
 		textarea:         ta,
-		messages:         []string{},
+		messages:         make(map[string][]string),
 		err:              nil,
 		senderStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true),
 		chatClient:       CreateChatClient(log.Printf),
@@ -122,7 +123,7 @@ func InitialModel(addr string) model {
 		usernameInput:    ui,
 		currentView:      ViewLogin,
 		loginHelper:      "",
-		currentUsers:     []string{},
+		currentUsers:     []string{"ALL"},
 		currentSelection: 0,
 	}
 }
@@ -150,9 +151,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		taHeight := m.textarea.Height() + decorationSpace
 		m.viewport.Height = msg.Height - taHeight - decorationSpace
 
-		if len(m.messages) > 0 {
-			m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(strings.Join(m.messages, "\n")))
-		}
 		m.viewport.GotoBottom()
 		m.height = msg.Height
 		m.width = msg.Width
@@ -280,11 +278,36 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case userListMsg:
-		m.currentUsers = msg.users
+		filteredUsers := []string{}
+		for _, user := range msg.users {
+			if user != m.username {
+				filteredUsers = append(filteredUsers, user)
+			}
+		}
+
+		m.currentUsers = append([]string{"ALL"}, filteredUsers...)
 		return m, listenCmd(m.chatClient, m.conn)
 	case receivedMsg:
-		m.messages = append(m.messages, m.senderStyle.Render(msg.username+": ")+msg.content)
-		m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(strings.Join(m.messages, "\n")))
+
+		formattedMsg := fmt.Sprintf("%s: %s", m.senderStyle.Render(msg.username), msg.content)
+
+		var chatTab string
+		if msg.destination == "ALL" {
+			chatTab = "ALL"
+		} else if msg.username == m.username {
+			chatTab = msg.destination
+		} else {
+			chatTab = msg.username
+		}
+
+		m.messages[chatTab] = append(m.messages[chatTab], formattedMsg)
+
+		activeUser := m.currentUsers[m.currentSelection]
+		if chatTab == activeUser {
+			content := strings.Join(m.messages[activeUser], "\n")
+			m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(content))
+			m.viewport.GotoBottom()
+		}
 		m.viewport.GotoBottom()
 		return m, listenCmd(m.chatClient, m.conn)
 
@@ -306,7 +329,13 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Quit
 				}
 
-				return m, sendCmd(m.chatClient, m.conn, value)
+				destination := "ALL"
+
+				if m.currentSelection > 0 && m.currentSelection < len(m.currentUsers) {
+					destination = m.currentUsers[m.currentSelection]
+				}
+
+				return m, sendCmd(m.chatClient, m.conn, value, destination)
 			}
 		case tea.KeyTab:
 			if m.focusedArea == FocusChat {
@@ -321,12 +350,19 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focusedArea == FocusUserList {
 				if m.currentSelection > 0 {
 					m.currentSelection--
+					activeUser := m.currentUsers[m.currentSelection]
+					m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(strings.Join(m.messages[activeUser], "\n")))
+					m.viewport.GotoBottom()
 				}
 			}
 		case tea.KeyDown:
 			if m.focusedArea == FocusUserList {
 				if m.currentSelection < len(m.currentUsers)-1 {
 					m.currentSelection++
+
+					activeUser := m.currentUsers[m.currentSelection]
+					m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(strings.Join(m.messages[activeUser], "\n")))
+					m.viewport.GotoBottom()
 				}
 			}
 
@@ -372,7 +408,7 @@ func listenCmd(cc *ChatClient, conn *websocket.Conn) tea.Cmd {
 
 		switch msg := msg.(type) {
 		case message.ChatMessage:
-			return receivedMsg{username: msg.Username, content: msg.Message}
+			return receivedMsg{username: msg.Username, content: msg.Message, destination: msg.Destination}
 		case message.LoginResponse:
 			return loginMsg{success: msg.Success, message: msg.Message}
 		case message.UserListUpdate:
@@ -384,9 +420,9 @@ func listenCmd(cc *ChatClient, conn *websocket.Conn) tea.Cmd {
 	}
 }
 
-func sendCmd(cc *ChatClient, conn *websocket.Conn, content string) tea.Cmd {
+func sendCmd(cc *ChatClient, conn *websocket.Conn, content string, destination string) tea.Cmd {
 	return func() tea.Msg {
-		cc.SendMessage(conn, content)
+		cc.SendMessage(conn, content, destination)
 		return nil
 	}
 }

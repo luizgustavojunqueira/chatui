@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -166,10 +167,20 @@ func (hub Hub) Run() {
 				client.Conn.Close(websocket.StatusNormalClosure, "")
 			}
 		case msg := <-hub.broadcast:
-
 			envelope := message.MakeEnvelope(message.TypeChatMessage, msg)
-			for client := range hub.clients {
-				wsjson.Write(context.Background(), client.Conn, envelope)
+
+			fmt.Println("Broadcasting message to", msg.Destination)
+
+			if msg.Destination == "ALL" {
+				for client := range hub.clients {
+					wsjson.Write(context.Background(), client.Conn, envelope)
+				}
+			} else {
+				for client := range hub.clients {
+					if client.Username == msg.Destination || client.Username == msg.Username {
+						wsjson.Write(context.Background(), client.Conn, envelope)
+					}
+				}
 			}
 		case check := <-hub.checkUsername:
 			taken := false
