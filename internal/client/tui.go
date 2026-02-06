@@ -76,6 +76,8 @@ type model struct {
 	currentView ViewState
 	senderStyle lipgloss.Style
 	err         error
+	height      int
+	width       int
 }
 
 type (
@@ -97,7 +99,7 @@ func InitialModel(addr string) model {
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	ta.ShowLineNumbers = false
 
-	vp := viewport.New(70, 20)
+	vp := viewport.New(0, 0)
 
 	vp.SetContent("Welcome to the chat!\n")
 
@@ -138,6 +140,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.conn = msg.conn
 	case errorMsg:
 		m.err = msg.err
+
+	case tea.WindowSizeMsg:
+		const decorationSpace = 4
+		sidebarWidth := 25
+		chatAreaWidth := msg.Width - sidebarWidth
+		m.viewport.Width = chatAreaWidth - decorationSpace
+		m.textarea.SetWidth(chatAreaWidth - decorationSpace)
+		taHeight := m.textarea.Height() + decorationSpace
+		m.viewport.Height = msg.Height - taHeight - decorationSpace
+
+		if len(m.messages) > 0 {
+			m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(strings.Join(m.messages, "\n")))
+		}
+		m.viewport.GotoBottom()
+		m.height = msg.Height
+		m.width = msg.Width
 	}
 	switch m.currentView {
 	case ViewLogin:
@@ -182,6 +200,7 @@ func (m model) renderSidebar() string {
 	}
 	style := lipgloss.NewStyle().
 		Width(20).
+		Height(m.height - 2).
 		Padding(1).
 		Border(lipgloss.RoundedBorder())
 
@@ -195,17 +214,27 @@ func (m model) renderSidebar() string {
 }
 
 func (m model) renderChatArea() string {
-	vpStyle := lipgloss.NewStyle()
+	vpStyle := lipgloss.NewStyle().
+		Width(m.viewport.Width + 2).
+		Height(m.viewport.Height + 2).
+		Border(lipgloss.RoundedBorder()).
+		Padding(1)
+
 	if m.focusedArea == FocusChat {
-		vpStyle = vpStyle.BorderForeground(lipgloss.Color("62"))
+		vpStyle = vpStyle.BorderForeground(lipgloss.Color("179"))
 	}
-	taStyle := lipgloss.NewStyle()
+
+	taStyle := lipgloss.NewStyle().
+		Width(m.viewport.Width + 2).
+		Border(lipgloss.RoundedBorder()).
+		Padding(1)
+
 	if m.focusedArea == FocusChat {
-		taStyle = taStyle.BorderForeground(lipgloss.Color("62"))
+		taStyle = taStyle.BorderForeground(lipgloss.Color("179"))
 	}
-	return lipgloss.JoinVertical(lipgloss.Top,
-		vpStyle.Border(lipgloss.RoundedBorder()).Padding(1).Width(m.viewport.Width).Height(m.viewport.Height).Render(m.viewport.View()),
-		taStyle.Border(lipgloss.RoundedBorder()).Padding(1).Render(m.textarea.View()),
+	return lipgloss.JoinVertical(lipgloss.Left,
+		vpStyle.Render(m.viewport.View()),
+		taStyle.Render(m.textarea.View()),
 	)
 }
 
@@ -258,16 +287,7 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(strings.Join(m.messages, "\n")))
 		m.viewport.GotoBottom()
 		return m, listenCmd(m.chatClient, m.conn)
-	case tea.WindowSizeMsg:
-		m.viewport.Width = msg.Width
-		m.textarea.SetWidth(msg.Width)
-		m.viewport.Height = msg.Height - m.textarea.Height() - lipgloss.Height(gap)
 
-		if len(m.messages) > 0 {
-			m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(strings.Join(m.messages, "\n")))
-		}
-
-		m.viewport.GotoBottom()
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
