@@ -62,9 +62,10 @@ type model struct {
 	currentSelection int
 
 	// Chat
-	viewport viewport.Model
-	messages map[string][]string
-	textarea textarea.Model
+	viewport         viewport.Model
+	messages         map[string][]string
+	qntNotifications map[string]int
+	textarea         textarea.Model
 
 	// Focus
 	focusedArea FocusState
@@ -125,6 +126,7 @@ func InitialModel(addr string) model {
 		loginHelper:      "",
 		currentUsers:     []string{"ALL"},
 		currentSelection: 0,
+		qntNotifications: make(map[string]int),
 	}
 }
 
@@ -190,10 +192,19 @@ func (m model) renderSidebar() string {
 	var userList strings.Builder
 	userList.WriteString("Active users\n\n")
 	for i, user := range m.currentUsers {
+		var line strings.Builder
 		if i == m.currentSelection {
-			fmt.Fprintf(&userList, "» %s\n", user)
+			fmt.Fprintf(&line, "» %s", user)
+			if m.qntNotifications[user] > 0 {
+				fmt.Fprintf(&line, " (%d)", m.qntNotifications[user])
+			}
+			fmt.Fprintf(&userList, "%s\n", lipgloss.NewStyle().Foreground(lipgloss.Color("62")).Render(line.String()))
 		} else {
-			fmt.Fprintf(&userList, "  %s\n", user)
+			fmt.Fprintf(&line, "  %s", user)
+			if m.qntNotifications[user] > 0 {
+				fmt.Fprintf(&line, " (%d)", m.qntNotifications[user])
+			}
+			fmt.Fprintf(&userList, "%s\n", line.String())
 		}
 	}
 	style := lipgloss.NewStyle().
@@ -307,6 +318,8 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			content := strings.Join(m.messages[activeUser], "\n")
 			m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(content))
 			m.viewport.GotoBottom()
+		} else {
+			m.qntNotifications[chatTab]++
 		}
 		m.viewport.GotoBottom()
 		return m, listenCmd(m.chatClient, m.conn)
@@ -344,6 +357,8 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.focusedArea = FocusChat
 				m.textarea.Focus()
+				activeUser := m.currentUsers[m.currentSelection]
+				m.qntNotifications[activeUser] = 0
 			}
 			return m, nil
 		case tea.KeyUp:
