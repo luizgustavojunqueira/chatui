@@ -92,6 +92,10 @@ func (cs ChatServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		json.Unmarshal(env.Data, &msg)
 
+		if len(msg.Message) > 200 {
+			msg.Message = msg.Message[:200]
+		}
+
 		msg.Username = client.Username
 		cs.hub.broadcast <- msg
 	}
@@ -123,6 +127,24 @@ func (cs ChatServer) handleUsernameRegistration(ctx context.Context, client *Con
 
 		json.Unmarshal(envelope.Data, &loginReq)
 
+		if loginReq.Username == "" {
+			resp := message.MakeEnvelope(message.TypeLoginResponse, message.LoginResponse{
+				Success: false,
+				Message: "Username cannot be empty",
+			})
+			wsjson.Write(ctx, client.Conn, resp)
+			continue
+		}
+
+		if len(loginReq.Username) > 32 {
+			resp := message.MakeEnvelope(message.TypeLoginResponse, message.LoginResponse{
+				Success: false,
+				Message: "Username cannot be longer than 32 characters",
+			})
+			wsjson.Write(ctx, client.Conn, resp)
+			continue
+		}
+
 		if cs.hub.isUsernameTaken(loginReq.Username) {
 			resp := message.MakeEnvelope(message.TypeLoginResponse, message.LoginResponse{
 				Success: false,
@@ -131,7 +153,6 @@ func (cs ChatServer) handleUsernameRegistration(ctx context.Context, client *Con
 			wsjson.Write(ctx, client.Conn, resp)
 
 			continue
-
 		}
 
 		client.Username = loginReq.Username
