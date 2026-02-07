@@ -263,6 +263,9 @@ func (m model) updateLogin(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
+			if m.conn != nil {
+				m.chatClient.Disconnect(m.conn)
+			}
 			return m, tea.Quit
 		case tea.KeyEnter:
 			username := m.usernameInput.Value()
@@ -338,7 +341,9 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewport.GotoBottom()
 
 				if value == "/quit" {
-					m.chatClient.Disconnect(m.conn)
+					if m.conn != nil {
+						m.chatClient.Disconnect(m.conn)
+					}
 					return m, tea.Quit
 				}
 

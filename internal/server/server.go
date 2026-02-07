@@ -149,22 +149,12 @@ func (hub Hub) Run() {
 		select {
 		case client := <-hub.register:
 			hub.clients[client] = true
-			userList := message.UserListUpdate{
-				Users: make([]string, 0, len(hub.clients)),
-			}
-
-			for client := range hub.clients {
-				userList.Users = append(userList.Users, client.Username)
-			}
-
-			envelope := message.MakeEnvelope(message.TypeUserListUpdate, userList)
-			for client := range hub.clients {
-				wsjson.Write(context.Background(), client.Conn, envelope)
-			}
+			hub.broadcastUserList()
 		case client := <-hub.unregister:
 			if _, ok := hub.clients[client]; ok {
 				delete(hub.clients, client)
 				client.Conn.Close(websocket.StatusNormalClosure, "")
+				hub.broadcastUserList()
 			}
 		case msg := <-hub.broadcast:
 			envelope := message.MakeEnvelope(message.TypeChatMessage, msg)
@@ -201,4 +191,19 @@ func (hub Hub) isUsernameTaken(username string) bool {
 		response: responseChan,
 	}
 	return <-responseChan
+}
+
+func (hub Hub) broadcastUserList() {
+	userList := message.UserListUpdate{
+		Users: make([]string, 0, len(hub.clients)),
+	}
+
+	for client := range hub.clients {
+		userList.Users = append(userList.Users, client.Username)
+	}
+
+	envelope := message.MakeEnvelope(message.TypeUserListUpdate, userList)
+	for client := range hub.clients {
+		wsjson.Write(context.Background(), client.Conn, envelope)
+	}
 }
