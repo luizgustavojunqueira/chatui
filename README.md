@@ -4,10 +4,7 @@ Chatui is a terminal chat client/server built in Go using websockets and a Bubbl
 
 ## Demo Video
 
-<video controls>
-  <source src="https://luizgustavojunqueira-personalblog.s3.us-east-1.amazonaws.com/Chatui/screenrecording-2026-02-06_23-08-02.mp4" type="video/mp4">
-  Seu navegador não suporta o elemento de vídeo.
-</video>
+[Video](https://luizgustavojunqueira-personalblog.s3.us-east-1.amazonaws.com/Chatui/screenrecording-2026-02-06_23-08-02.mp4)
 
 ## Blog Post
 
