@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	message "chatui/internal/protocol"
 
@@ -74,6 +75,7 @@ type model struct {
 
 	// Focus
 	focusedArea FocusState
+	blinkOn     bool
 
 	// Shared
 	chatClient  *ChatClient
@@ -88,14 +90,16 @@ type model struct {
 }
 
 type (
-	errMsg error
+	errMsg   error
+	blinkMsg struct{}
 )
 
 const gap = "\n\n"
+const sidebarWidth = 26
 
 func InitialModel(addr string) model {
 	ta := textarea.New()
-	ta.Placeholder = "Type your message..."
+	ta.Placeholder = "Type your message... (/quit to exit)"
 	ta.Focus()
 
 	ta.Prompt = "┃ "
@@ -121,12 +125,6 @@ func InitialModel(addr string) model {
 
 	vp := viewport.New(0, 0)
 	vp.Style = lipgloss.NewStyle().Background(lipgloss.Color("234"))
-
-	welcomeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("86")).
-		Background(lipgloss.Color("234")).
-		Bold(true)
-	vp.SetContent(welcomeStyle.Render("Welcome to the chat!") + "\n")
 
 	ta.KeyMap.InsertNewline.SetEnabled(false)
 
@@ -168,6 +166,7 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		textarea.Blink,
 		connectCmd(m.chatClient, m.address),
+		blinkCmd(),
 	)
 }
 
@@ -177,9 +176,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.conn = msg.conn
 	case errorMsg:
 		m.err = msg.err
+	case blinkMsg:
+		m.blinkOn = !m.blinkOn
+		return m, blinkCmd()
 
 	case tea.WindowSizeMsg:
-		sidebarWidth := 26
 		chatAreaWidth := msg.Width - sidebarWidth
 		taWidth := chatAreaWidth - 2
 		m.viewport.Width = taWidth
@@ -279,16 +280,17 @@ func (m model) viewChat() string {
 
 func (m model) renderSidebar() string {
 	var userList strings.Builder
+	contentWidth := sidebarWidth - 2 // account for padding on the sidebar container
 
 	titleStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("86")).
 		Bold(true).
 		Background(lipgloss.Color("236")).
 		Padding(0, 1).
-		Width(20).
+		Width(contentWidth).
 		Align(lipgloss.Center)
 
-	userList.WriteString(titleStyle.Render("Active users") + "\n\n")
+	userList.WriteString(titleStyle.Render("Active users  (Tab: focus)") + "\n\n")
 
 	for i, user := range m.currentUsers {
 		var line strings.Builder
@@ -298,7 +300,11 @@ func (m model) renderSidebar() string {
 				Background(lipgloss.Color("62")).
 				Bold(true).
 				Padding(0, 1).
-				Width(20)
+				Width(contentWidth)
+
+			if m.focusedArea == FocusUserList && !m.blinkOn {
+				itemStyle = itemStyle.Foreground(lipgloss.Color("62")).Background(lipgloss.Color("235"))
+			}
 
 			fmt.Fprintf(&line, "» %s", user)
 			if m.qntNotifications[user] > 0 {
@@ -310,7 +316,7 @@ func (m model) renderSidebar() string {
 				Foreground(lipgloss.Color("250")).
 				Background(lipgloss.Color("235")).
 				Padding(0, 1).
-				Width(20)
+				Width(contentWidth)
 
 			fmt.Fprintf(&line, "  %s", user)
 			if m.qntNotifications[user] > 0 {
@@ -326,7 +332,7 @@ func (m model) renderSidebar() string {
 	content := userList.String()
 
 	style := lipgloss.NewStyle().
-		Width(26).
+		Width(sidebarWidth).
 		Height(m.height).
 		Background(lipgloss.Color("235")).
 		Padding(1)
@@ -351,7 +357,7 @@ func (m model) renderMessages(user string) string {
 }
 
 func (m model) renderChatArea() string {
-	chatWidth := m.width - 26
+	chatWidth := m.width - sidebarWidth
 
 	m.viewport.Style = lipgloss.NewStyle().Background(lipgloss.Color("234"))
 
@@ -512,7 +518,7 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			} else {
 				m.focusedArea = FocusChat
-				cmd := m.textarea.Focus()
+				cmd := tea.Batch(m.textarea.Focus(), textarea.Blink)
 				activeUser := m.currentUsers[m.currentSelection]
 				m.qntNotifications[activeUser] = 0
 				return m, cmd
@@ -595,4 +601,8 @@ func sendCmd(cc *ChatClient, conn *websocket.Conn, content string, destination s
 		cc.SendMessage(conn, content, destination)
 		return nil
 	}
+}
+
+func blinkCmd() tea.Cmd {
+	return tea.Tick(time.Millisecond*150, func(t time.Time) tea.Msg { return blinkMsg{} })
 }
