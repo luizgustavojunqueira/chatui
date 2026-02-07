@@ -52,6 +52,11 @@ const (
 	FocusUserList
 )
 
+type rawMessage struct {
+	username string
+	content  string
+}
+
 type model struct {
 	// Login
 	usernameInput textinput.Model
@@ -63,7 +68,7 @@ type model struct {
 
 	// Chat
 	viewport         viewport.Model
-	messages         map[string][]string
+	messages         map[string][]rawMessage
 	qntNotifications map[string]int
 	textarea         textarea.Model
 
@@ -98,12 +103,30 @@ func InitialModel(addr string) model {
 	ta.SetWidth(50)
 	ta.SetHeight(4)
 
-	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle().Background(lipgloss.Color("236"))
 	ta.ShowLineNumbers = false
 
-	vp := viewport.New(0, 0)
+	ta.EndOfBufferCharacter = ' '
+	ta.FocusedStyle.EndOfBuffer = lipgloss.NewStyle().Background(lipgloss.Color("236"))
+	ta.BlurredStyle.EndOfBuffer = lipgloss.NewStyle().Background(lipgloss.Color("236"))
 
-	vp.SetContent("Welcome to the chat!\n")
+	ta.FocusedStyle.Base = lipgloss.NewStyle().Background(lipgloss.Color("236"))
+	ta.BlurredStyle.Base = lipgloss.NewStyle().Background(lipgloss.Color("236"))
+	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Background(lipgloss.Color("236"))
+	ta.BlurredStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Background(lipgloss.Color("236"))
+	ta.FocusedStyle.Text = lipgloss.NewStyle().Background(lipgloss.Color("236"))
+	ta.BlurredStyle.Text = lipgloss.NewStyle().Background(lipgloss.Color("236"))
+	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Background(lipgloss.Color("236"))
+	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Background(lipgloss.Color("236"))
+
+	vp := viewport.New(0, 0)
+	vp.Style = lipgloss.NewStyle().Background(lipgloss.Color("234"))
+
+	welcomeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("86")).
+		Background(lipgloss.Color("234")).
+		Bold(true)
+	vp.SetContent(welcomeStyle.Render("Welcome to the chat!") + "\n")
 
 	ta.KeyMap.InsertNewline.SetEnabled(false)
 
@@ -113,12 +136,23 @@ func InitialModel(addr string) model {
 	ui.CharLimit = 32
 	ui.Width = 20
 
+	bgColor := lipgloss.Color("234")
+	emptyStyle := lipgloss.NewStyle().Background(bgColor)
+
+	ui.PromptStyle = emptyStyle
+	ui.TextStyle = emptyStyle
+	ui.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Background(bgColor)
+	ui.Cursor.Style = emptyStyle
+	ui.Cursor.TextStyle = emptyStyle
+
+	ui.Prompt = ""
+
 	return model{
 		viewport:         vp,
 		textarea:         ta,
-		messages:         make(map[string][]string),
+		messages:         make(map[string][]rawMessage),
 		err:              nil,
-		senderStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true),
+		senderStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Background(lipgloss.Color("234")).Bold(true),
 		chatClient:       CreateChatClient(log.Printf),
 		address:          addr,
 		usernameInput:    ui,
@@ -145,13 +179,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 
 	case tea.WindowSizeMsg:
-		const decorationSpace = 4
-		sidebarWidth := 25
+		sidebarWidth := 26
 		chatAreaWidth := msg.Width - sidebarWidth
-		m.viewport.Width = chatAreaWidth - decorationSpace
-		m.textarea.SetWidth(chatAreaWidth - decorationSpace)
-		taHeight := m.textarea.Height() + decorationSpace
-		m.viewport.Height = msg.Height - taHeight - decorationSpace
+		taWidth := chatAreaWidth - 2
+		m.viewport.Width = taWidth
+		m.textarea.SetWidth(taWidth)
+		taHeight := m.textarea.Height() + 2
+		m.viewport.Height = msg.Height - taHeight
 
 		m.viewport.GotoBottom()
 		m.height = msg.Height
@@ -177,73 +211,190 @@ func (m model) View() string {
 }
 
 func (m model) viewLogin() string {
-	return fmt.Sprintf(
-		"Enter your username:\n\n%s\n\n%s",
-		m.usernameInput.View(),
-		m.loginHelper,
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("86")).
+		Bold(true).
+		Background(lipgloss.Color("234"))
+
+	helperStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("208")).
+		Background(lipgloss.Color("234")).
+		Italic(true)
+
+	inputStyled := ""
+	if m.usernameInput.Value() == "" {
+		inputStyled = lipgloss.NewStyle().
+			Background(lipgloss.Color("234")).
+			Foreground(lipgloss.Color("240")).
+			Width(20).
+			Render("Username")
+	} else {
+		inputStyled = lipgloss.NewStyle().
+			Background(lipgloss.Color("234")).
+			Foreground(lipgloss.Color("250")).
+			Width(20).
+			Render(m.usernameInput.Value())
+	}
+
+	leftPadding := (m.width - 30) / 2
+	topPadding := (m.height - 8) / 2
+
+	if leftPadding < 0 {
+		leftPadding = 0
+	}
+	if topPadding < 0 {
+		topPadding = 0
+	}
+
+	content := fmt.Sprintf(
+		"%s\n\n> %s\n\n%s",
+		titleStyle.Render("Enter your username:"),
+		inputStyled,
+		helperStyle.Render(m.loginHelper),
 	)
+
+	centered := lipgloss.NewStyle().
+		PaddingTop(topPadding).
+		PaddingLeft(leftPadding).
+		Background(lipgloss.Color("234")).
+		Render(content)
+
+	return lipgloss.NewStyle().
+		Background(lipgloss.Color("234")).
+		Width(m.width).
+		Height(m.height).
+		Render(centered)
 }
 
 func (m model) viewChat() string {
-	return lipgloss.JoinHorizontal(lipgloss.Top, m.renderSidebar(), m.renderChatArea())
+	chatContent := lipgloss.JoinHorizontal(lipgloss.Top, m.renderSidebar(), m.renderChatArea())
+
+	fullScreenStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("234")).
+		Width(m.width).
+		Height(m.height)
+
+	return fullScreenStyle.Render(chatContent)
 }
 
 func (m model) renderSidebar() string {
 	var userList strings.Builder
-	userList.WriteString("Active users\n\n")
+
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("86")).
+		Bold(true).
+		Background(lipgloss.Color("236")).
+		Padding(0, 1).
+		Width(20).
+		Align(lipgloss.Center)
+
+	userList.WriteString(titleStyle.Render("Active users") + "\n\n")
+
 	for i, user := range m.currentUsers {
 		var line strings.Builder
 		if i == m.currentSelection {
+			itemStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("0")).
+				Background(lipgloss.Color("62")).
+				Bold(true).
+				Padding(0, 1).
+				Width(20)
+
 			fmt.Fprintf(&line, "» %s", user)
 			if m.qntNotifications[user] > 0 {
 				fmt.Fprintf(&line, " (%d)", m.qntNotifications[user])
 			}
-			fmt.Fprintf(&userList, "%s\n", lipgloss.NewStyle().Foreground(lipgloss.Color("62")).Render(line.String()))
+			fmt.Fprintf(&userList, "%s\n", itemStyle.Render(line.String()))
 		} else {
+			itemStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("250")).
+				Background(lipgloss.Color("235")).
+				Padding(0, 1).
+				Width(20)
+
 			fmt.Fprintf(&line, "  %s", user)
 			if m.qntNotifications[user] > 0 {
-				fmt.Fprintf(&line, " (%d)", m.qntNotifications[user])
+				notifStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("208")).
+					Bold(true)
+				fmt.Fprintf(&line, " %s", notifStyle.Render(fmt.Sprintf("(%d)", m.qntNotifications[user])))
 			}
-			fmt.Fprintf(&userList, "%s\n", line.String())
+			fmt.Fprintf(&userList, "%s\n", itemStyle.Render(line.String()))
 		}
 	}
+
+	content := userList.String()
+
 	style := lipgloss.NewStyle().
-		Width(20).
-		Height(m.height - 2).
-		Padding(1).
-		Border(lipgloss.RoundedBorder())
+		Width(26).
+		Height(m.height).
+		Background(lipgloss.Color("235")).
+		Padding(1)
 
-	if m.focusedArea == FocusUserList {
-		style = style.BorderForeground(lipgloss.Color("62"))
-	} else {
-		style = style.BorderForeground(lipgloss.Color("240"))
+	return style.Render(content)
+}
+
+func (m model) renderMessages(user string) string {
+	msgs := m.messages[user]
+	contentStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("234")).
+		Foreground(lipgloss.Color("252"))
+	lineStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("234")).
+		Width(m.viewport.Width)
+	var rendered []string
+	for _, raw := range msgs {
+		styled := m.senderStyle.Render(raw.username+":") + contentStyle.Render(" "+raw.content)
+		rendered = append(rendered, lineStyle.Render(styled))
 	}
-
-	return style.Render(userList.String())
+	return strings.Join(rendered, "\n")
 }
 
 func (m model) renderChatArea() string {
-	vpStyle := lipgloss.NewStyle().
-		Width(m.viewport.Width + 2).
-		Height(m.viewport.Height + 2).
-		Border(lipgloss.RoundedBorder()).
-		Padding(1)
+	chatWidth := m.width - 26
 
-	if m.focusedArea == FocusChat {
-		vpStyle = vpStyle.BorderForeground(lipgloss.Color("179"))
+	m.viewport.Style = lipgloss.NewStyle().Background(lipgloss.Color("234"))
+
+	vpStyle := lipgloss.NewStyle().
+		Width(chatWidth).
+		Height(m.viewport.Height).
+		Background(lipgloss.Color("234")).
+		Padding(0, 1)
+
+	taHeight := m.height - m.viewport.Height
+	if taHeight < 0 {
+		taHeight = 0
 	}
+
+	taWidth := chatWidth - 2
+
+	bgSeq := "\x1b[48;5;236m"
+	resetSeq := "\x1b[0m"
+
+	m.textarea.Focus()
+	taContent := m.textarea.View()
+	taContent = bgSeq + strings.ReplaceAll(taContent, resetSeq, resetSeq+bgSeq) + resetSeq
+
+	taLines := strings.Split(taContent, "\n")
+	lineStyle := lipgloss.NewStyle().Background(lipgloss.Color("236")).Width(taWidth)
+	for i, line := range taLines {
+		taLines[i] = lineStyle.Render(line)
+	}
+	for len(taLines) < taHeight {
+		taLines = append(taLines, lineStyle.Render(""))
+	}
+
+	filledTA := strings.Join(taLines, "\n")
 
 	taStyle := lipgloss.NewStyle().
-		Width(m.viewport.Width + 2).
-		Border(lipgloss.RoundedBorder()).
-		Padding(1)
+		Width(chatWidth).
+		Height(taHeight).
+		Background(lipgloss.Color("236")).
+		Padding(0, 1)
 
-	if m.focusedArea == FocusChat {
-		taStyle = taStyle.BorderForeground(lipgloss.Color("179"))
-	}
 	return lipgloss.JoinVertical(lipgloss.Left,
 		vpStyle.Render(m.viewport.View()),
-		taStyle.Render(m.textarea.View()),
+		taStyle.Render(filledTA),
 	)
 }
 
@@ -277,7 +428,7 @@ func (m model) updateLogin(msg tea.Msg) (tea.Model, tea.Cmd) {
 			)
 		default:
 			m.loginHelper = ""
-			return m, nil
+			return m, uiCmd
 		}
 	}
 
@@ -303,7 +454,7 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, listenCmd(m.chatClient, m.conn)
 	case receivedMsg:
 
-		formattedMsg := fmt.Sprintf("%s: %s", m.senderStyle.Render(msg.username), msg.content)
+		formattedMsg := rawMessage{username: msg.username, content: msg.content}
 
 		var chatTab string
 		if msg.destination == "ALL" {
@@ -318,8 +469,7 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		activeUser := m.currentUsers[m.currentSelection]
 		if chatTab == activeUser {
-			content := strings.Join(m.messages[activeUser], "\n")
-			m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(content))
+			m.viewport.SetContent(m.renderMessages(activeUser))
 			m.viewport.GotoBottom()
 		} else {
 			m.qntNotifications[chatTab]++
@@ -359,19 +509,20 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focusedArea == FocusChat {
 				m.focusedArea = FocusUserList
 				m.textarea.Blur()
+				return m, nil
 			} else {
 				m.focusedArea = FocusChat
-				m.textarea.Focus()
+				cmd := m.textarea.Focus()
 				activeUser := m.currentUsers[m.currentSelection]
 				m.qntNotifications[activeUser] = 0
+				return m, cmd
 			}
-			return m, nil
 		case tea.KeyUp:
 			if m.focusedArea == FocusUserList {
 				if m.currentSelection > 0 {
 					m.currentSelection--
 					activeUser := m.currentUsers[m.currentSelection]
-					m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(strings.Join(m.messages[activeUser], "\n")))
+					m.viewport.SetContent(m.renderMessages(activeUser))
 					m.viewport.GotoBottom()
 				}
 			}
@@ -381,7 +532,7 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.currentSelection++
 
 					activeUser := m.currentUsers[m.currentSelection]
-					m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(strings.Join(m.messages[activeUser], "\n")))
+					m.viewport.SetContent(m.renderMessages(activeUser))
 					m.viewport.GotoBottom()
 				}
 			}
@@ -395,7 +546,6 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if m.focusedArea == FocusChat {
 		m.textarea, tiCmd = m.textarea.Update(msg)
-		m.viewport, vpCmd = m.viewport.Update(msg)
 	}
 
 	return m, tea.Batch(tiCmd, vpCmd)

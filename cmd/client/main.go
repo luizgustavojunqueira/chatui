@@ -23,7 +23,7 @@ func run() error {
 
 	serverAddr := os.Args[1]
 
-	p := tea.NewProgram(client.InitialModel(serverAddr))
+	p := tea.NewProgram(client.InitialModel(serverAddr), tea.WithAltScreen())
 
 	_, err := p.Run()
 
